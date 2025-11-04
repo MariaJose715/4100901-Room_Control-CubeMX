@@ -47,6 +47,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/led_driver.c
     Core/Src/ring_buffer.c
+    Core/Src/keypad_driver.c
+    Core/Src/main.c
 
 
 

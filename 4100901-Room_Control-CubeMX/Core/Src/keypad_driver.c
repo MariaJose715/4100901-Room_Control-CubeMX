@@ -3,11 +3,12 @@
 
 // Mapa de teclas del teclado matricial, con su respectiva distribución
 static const char keypad_map[KEYPAD_ROWS][KEYPAD_COLS] = {
-  {'1', '2', '3', 'A'},
-  {'4', '5', '6', 'B'},
-  {'7', '8', '9', 'C'},
-  {'*', '0', '#', 'D'}
+  {'A', '3', '2', '1'},
+  {'B', '6', '5', '4'},
+  {'C', '9', '8', '7'},
+  {'D', '#', '0', '*'}
 };
+
 
 /**
  * @brief Esta función configura las filas del teclado como salidas y las deja en nivel bajo.
@@ -65,6 +66,7 @@ char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
             break;
         }
     }
+
 
     // Finalmente se vuelve a poner todo en estado bajo para esperar la próxima interrupción
     for (int i = 0; i < KEYPAD_ROWS; i++) {
