@@ -61,11 +61,12 @@ keypad_handle_t keypad = {
     .col_ports = {KEYPAD_C1_GPIO_Port, KEYPAD_C2_GPIO_Port, KEYPAD_C3_GPIO_Port, KEYPAD_C4_GPIO_Port},
     .col_pins  = {KEYPAD_C1_Pin, KEYPAD_C2_Pin, KEYPAD_C3_Pin, KEYPAD_C4_Pin}
 };
-
+// --- Buffer circular para teclas ---
 #define KEYPAD_BUFFER_LEN 16
 uint8_t keypad_buffer[KEYPAD_BUFFER_LEN];
 ring_buffer_t keypad_rb;
 
+// --- VARIABLES DE CONTROL DE ACCESO ---
 char entered_password[PASSWORD_LEN + 1] = {0};
 uint8_t password_index = 0;
 
@@ -108,17 +109,20 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void process_key(uint8_t key)
 {
     // 1. Proporcionar feedback visual inmediato al usuario
+    // Encender LED brevemente como feedback
     led_on(&led1);
     led_timer_start = HAL_GetTick();
     led_on_duration = FEEDBACK_LED_TIME_MS;
 
     // 2. Almacenar el dígito si la contraseña no está completa
+   // Guardar el dígito ingresado
     if (password_index < PASSWORD_LEN) {
         entered_password[password_index++] = (char)key;
         printf("Digito presionado: %c\r\n", key);
     }
 
     // 3. Si la contraseña se ha completado, verificarla
+    // Si ya se ingresaron 4 dígitos, verificar contraseña
     if (password_index == PASSWORD_LEN) {
         if (strncmp(entered_password, PASSWORD, PASSWORD_LEN) == 0) {
             printf("Contraseña correcta. ACCESO AUTORIZADO.\r\n");
@@ -127,12 +131,11 @@ void process_key(uint8_t key)
             led_timer_start = HAL_GetTick();
             led_on_duration = SUCCESS_LED_TIME_MS;
         } else {
-            printf("Contraseña incorrecta. ACCESO DENEGADO: .\r\n");
-            // Apagar el LED inmediatamente (o después del breve feedback)
+            printf("Contraseña incorrecta. ACCESO DENEGADO.\r\n");
+           // Apagar el LED para indicar fallo
             led_off(&led1);
-            led_timer_start = 0; // Detener cualquier temporizador activo
         }
-        
+
         // 4. Reiniciar para el siguiente intento
         password_index = 0;
         memset(entered_password, 0, sizeof(entered_password));
@@ -145,15 +148,12 @@ void process_key(uint8_t key)
  * @note  Esta función debe ser llamada repetidamente en el bucle principal.
  */
 void manage_led_timer(void)
+
 {
-    // Si el temporizador del LED está activo...
-    if (led_timer_start != 0) {
-        // ...y ha transcurrido el tiempo de duración...
-        if (HAL_GetTick() - led_timer_start > led_on_duration) {
-            // ...apagar el LED y desactivar el temporizador.
-            led_off(&led1);
-            led_timer_start = 0;
-        }
+  // Apaga el LED automáticamente cuando el tiempo indicado termina.
+    if (led_timer_start != 0 && (HAL_GetTick() - led_timer_start > led_on_duration)) {
+        led_off(&led1);
+        led_timer_start = 0;
     }
 }
 
@@ -204,20 +204,20 @@ int main(void)
   {
     uint8_t key_from_buffer;
     
-    // 1. Intentar leer una tecla del buffer (que es llenado por la interrupción)
+  // Leer teclas del buffer circular
     if (ring_buffer_read(&keypad_rb, &key_from_buffer)) {
-        uint32_t current_time = HAL_GetTick();
-        
-        // 2. Aplicar lógica de anti-rebote (debounce) para evitar lecturas falsas
-        if (current_time - last_key_press_time > DEBOUNCE_TIME_MS) {
-            last_key_press_time = current_time; // Actualizar el tiempo de la última pulsación
-            process_key(key_from_buffer);       // Procesar la tecla si el tiempo es válido
+        uint32_t now = HAL_GetTick();
+        // Anti-rebote: procesar solo si ha pasado el tiempo definido
+        if (now - last_key_press_time > DEBOUNCE_TIME_MS) {
+            last_key_press_time = now;
+            process_key(key_from_buffer);
         }
     }
 
     // 3. Gestionar el temporizador del LED en cada iteración del bucle.
     //    Esto permite que el LED se apague solo sin detener el programa.
-    manage_led_timer();
+    // Manejo del temporizador del LED (no bloqueante)
+   manage_led_timer();
     
     /* USER CODE END WHILE */
 
@@ -225,6 +225,7 @@ int main(void)
   }
   /* USER CODE END 3 */
 }
+/* ---------------------- FUNCIONES DE HARDWARE ---------------------- */
 
 /**
   * @brief System Clock Configuration

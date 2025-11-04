@@ -4,12 +4,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/**
+ * @brief Estructura del buffer circular (FIFO).
+ */
 typedef struct {
-    uint8_t *buffer;
-    uint16_t head;
-    uint16_t tail;
-    uint16_t capacity;
-    bool is_full; // initialize the full flag to false
+    uint8_t *buffer;     // Memoria del buffer
+    uint16_t head;       // Índice de escritura
+    uint16_t tail;       // Índice de lectura
+    uint16_t capacity;   // Tamaño máximo
+    bool is_full;        // Bandera que indica si está lleno
 } ring_buffer_t;
 
 void ring_buffer_init(ring_buffer_t *rb, uint8_t *buffer, uint16_t capacity);

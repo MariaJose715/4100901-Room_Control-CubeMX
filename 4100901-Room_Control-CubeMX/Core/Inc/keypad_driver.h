@@ -7,6 +7,9 @@
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 4
 
+/**
+ * @brief Estructura que contiene los puertos y pines del teclado.
+ */
 typedef struct {
     GPIO_TypeDef* row_ports[KEYPAD_ROWS];
     uint16_t row_pins[KEYPAD_ROWS];

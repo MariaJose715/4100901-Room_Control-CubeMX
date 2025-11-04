@@ -1,77 +1,65 @@
 #include "keypad_driver.h"
-#include "main.h" // Se incluye para poder usar las funciones HAL y manejar los pines GPIO
+#include "main.h"
 
-// Mapa de teclas del teclado matricial, con su respectiva distribución
+// Mapa estándar de teclas (4x4)
 static const char keypad_map[KEYPAD_ROWS][KEYPAD_COLS] = {
-  {'A', '3', '2', '1'},
-  {'B', '6', '5', '4'},
-  {'C', '9', '8', '7'},
-  {'D', '#', '0', '*'}
+    {'1', '2', '3', 'A'},
+    {'4', '5', '6', 'B'},
+    {'7', '8', '9', 'C'},
+    {'*', '0', '#', 'D'}
 };
 
-
 /**
- * @brief Esta función configura las filas del teclado como salidas y las deja en nivel bajo.
- * @param keypad: estructura que tiene la información de pines del teclado.
+ * @brief Inicializa las filas en nivel bajo.
+ * Esto deja el teclado listo para detectar flancos descendentes por columna.
  */
 void keypad_init(keypad_handle_t* keypad) {
-    // Configura cada fila como salida y las pone en 0 voltios (bajo)
-    // Esto es necesario para que las columnas puedan detectar una pulsación
     for (int i = 0; i < KEYPAD_ROWS; i++) {
         HAL_GPIO_WritePin(keypad->row_ports[i], keypad->row_pins[i], GPIO_PIN_RESET);
     }
 }
 
 /**
- * @brief Función que detecta qué tecla fue presionada en función de la columna que activó la interrupción.
- * @param keypad: puntero a la estructura del teclado.
- * @param col_pin: número de pin que causó la interrupción.
- * @return Devuelve el carácter de la tecla presionada o '\0' si no se detectó ninguna.
+ * @brief Escanea qué tecla fue presionada en función de la columna activada.
  */
 char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
-    char key_pressed = '\0';
+    HAL_Delay(5); // Pequeño delay de antirrebote
+
+    // Determinar qué columna generó la interrupción
     int col_index = -1;
-
-    // Se elimina el antirrebote dentro de esta función para mayor rapidez.
-
-    // Se determina qué columna generó la interrupción comparando los pines
     for (int i = 0; i < KEYPAD_COLS; i++) {
-        if (col_pin == keypad->col_pins[i]) {
+        if (keypad->col_pins[i] == col_pin) {
             col_index = i;
             break;
         }
     }
+    if (col_index == -1) return '\0'; // Columna inválida
 
-    // Si no corresponde a una columna conocida, se retorna sin hacer nada
-    if (col_index == -1) {
-        return '\0';
+    char key_pressed = '\0';
+
+    // Poner todas las filas en ALTO antes de escanear
+    for (int i = 0; i < KEYPAD_ROWS; i++) {
+        HAL_GPIO_WritePin(keypad->row_ports[i], keypad->row_pins[i], GPIO_PIN_SET);
     }
 
-    // Se espera un poco para que el estado eléctrico de las señales se estabilice
-    HAL_Delay(2);
-
-    // Escaneo de filas: se busca en cuál fila está la conexión activa
+    // Activar una fila a la vez
     for (int row = 0; row < KEYPAD_ROWS; row++) {
-        // Todas las filas se ponen en estado alto
-        for (int i = 0; i < KEYPAD_ROWS; i++) {
-            HAL_GPIO_WritePin(keypad->row_ports[i], keypad->row_pins[i], GPIO_PIN_SET);
-        }
-
-        // Se baja solo la fila que queremos comprobar
         HAL_GPIO_WritePin(keypad->row_ports[row], keypad->row_pins[row], GPIO_PIN_RESET);
+        HAL_Delay(1);
 
-        // Si la columna correspondiente sigue en bajo, encontramos la tecla
+        // Si la columna sigue en bajo → tecla encontrada
         if (HAL_GPIO_ReadPin(keypad->col_ports[col_index], keypad->col_pins[col_index]) == GPIO_PIN_RESET) {
             key_pressed = keypad_map[row][col_index];
+
+            // Esperar a que se suelte la tecla
+            while (HAL_GPIO_ReadPin(keypad->col_ports[col_index], keypad->col_pins[col_index]) == GPIO_PIN_RESET);
             break;
         }
+
+        HAL_GPIO_WritePin(keypad->row_ports[row], keypad->row_pins[row], GPIO_PIN_SET);
     }
 
-
-    // Finalmente se vuelve a poner todo en estado bajo para esperar la próxima interrupción
-    for (int i = 0; i < KEYPAD_ROWS; i++) {
-        HAL_GPIO_WritePin(keypad->row_ports[i], keypad->row_pins[i], GPIO_PIN_RESET);
-    }
-
+    // Restaurar filas en bajo
+    keypad_init(keypad);
     return key_pressed;
 }

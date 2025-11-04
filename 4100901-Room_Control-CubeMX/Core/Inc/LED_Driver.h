@@ -6,8 +6,8 @@
 
 // Tipos de datos públicos
 typedef struct {
-    GPIO_TypeDef *port;
-    uint16_t pin;
+    GPIO_TypeDef *port;  // Puerto del LED (por ejemplo, GPIOA)
+    uint16_t pin;        // Pin del LED (por ejemplo, GPIO_PIN_5)
 } led_handle_t;
 
 // API pública
@@ -17,3 +17,5 @@ void led_off(led_handle_t *led);
 void led_toggle(led_handle_t *led);
 
 #endif // LED_DRIVER_H
+
+
