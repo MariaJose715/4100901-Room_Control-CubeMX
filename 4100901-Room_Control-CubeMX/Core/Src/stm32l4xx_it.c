@@ -216,6 +216,7 @@ void EXTI9_5_IRQHandler(void)
 
 /**
   * @brief This function handles USART2 global interrupt.
+  * @note  Esta función es llamada cuando se recibe un dato por USART2.
   */
 void USART2_IRQHandler(void)
 {

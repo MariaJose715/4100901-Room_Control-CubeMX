@@ -2,6 +2,9 @@
 #include "main.h"
 
 // Mapa estándar de teclas (4x4)
+/**
+ * @brief Mapa de teclas del keypad 4x4.
+ */
 static const char keypad_map[KEYPAD_ROWS][KEYPAD_COLS] = {
     {'1', '2', '3', 'A'},
     {'4', '5', '6', 'B'},
@@ -60,6 +63,9 @@ char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
     }
 
     // Restaurar filas en bajo
+    /**
+     * @brief Inicializa las filas en nivel bajo.
+     */
     keypad_init(keypad);
     return key_pressed;
 }

@@ -6,6 +6,7 @@
 
 /**
  * @brief Estructura del buffer circular (FIFO).
+ * @note  Esta estructura gestiona un buffer circular para almacenamiento temporal de datos.
  */
 typedef struct {
     uint8_t *buffer;     // Memoria del buffer
@@ -15,6 +16,9 @@ typedef struct {
     bool is_full;        // Bandera que indica si está lleno
 } ring_buffer_t;
 
+/**
+* @brief Inicializa el buffer circular.
+ */
 void ring_buffer_init(ring_buffer_t *rb, uint8_t *buffer, uint16_t capacity);
 bool ring_buffer_write(ring_buffer_t *rb, uint8_t data);
 bool ring_buffer_read(ring_buffer_t *rb, uint8_t *data);

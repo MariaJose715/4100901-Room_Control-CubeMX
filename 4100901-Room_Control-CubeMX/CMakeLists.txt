@@ -50,8 +50,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/keypad_driver.c
     Core/Src/main.c
 
-
-
 )
 
 

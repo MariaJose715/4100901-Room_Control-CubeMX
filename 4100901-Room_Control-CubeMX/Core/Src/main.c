@@ -53,7 +53,13 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 // --- HANDLES Y BUFFERS ---
-led_handle_t led1 = { .port = GPIOA, .pin = GPIO_PIN_5 }; // LD2 
+/**
+ * @brief LED principal (LD2 en la Nucleo) ---
+ * @note  Esta estructura se utiliza para controlar el LED integrado en la placa.
+ * @param led1 Estructura que define el puerto y pin del LED.
+ */
+led_handle_t led1 = { .port = GPIOA, .pin = GPIO_PIN_5 }; // LD2
+led_handle_t led_ext = { .port = GPIOA, .pin = GPIO_PIN_7 }; // LED externo en PA7
 
 keypad_handle_t keypad = {
     .row_ports = {KEYPAD_R1_GPIO_Port, KEYPAD_R2_GPIO_Port, KEYPAD_R3_GPIO_Port, KEYPAD_R4_GPIO_Port},
@@ -126,33 +132,37 @@ void process_key(uint8_t key)
     if (password_index == PASSWORD_LEN) {
         if (strncmp(entered_password, PASSWORD, PASSWORD_LEN) == 0) {
             printf("Contraseña correcta. ACCESO AUTORIZADO.\r\n");
-            // Iniciar el temporizador largo para el LED de éxito
+            // Encender los LEDs para indicar éxito
             led_on(&led1);
+            led_on(&led_ext);
             led_timer_start = HAL_GetTick();
             led_on_duration = SUCCESS_LED_TIME_MS;
         } else {
             printf("Contraseña incorrecta. ACCESO DENEGADO.\r\n");
            // Apagar el LED para indicar fallo
             led_off(&led1);
+            led_off(&led_ext);
         }
 
         // 4. Reiniciar para el siguiente intento
         password_index = 0;
         memset(entered_password, 0, sizeof(entered_password));
-        printf("\nSistema de acceso listo. Ingrese la contraseña de 4 digitos...\r\n");
+        printf("\nSistema de acceso listo. Ingrese la contraseña de 4 digitos.\r\n");
     }
 }
 
 /**
- * @brief Gestiona el apagado automático del LED sin bloquear el programa.
+ * @brief Gestiona el apagado automático de los LEDs sin bloquear el programa.
  * @note  Esta función debe ser llamada repetidamente en el bucle principal.
  */
 void manage_led_timer(void)
 
 {
-  // Apaga el LED automáticamente cuando el tiempo indicado termina.
+  // Apaga los LEDs automáticamente cuando el tiempo indicado termina.
     if (led_timer_start != 0 && (HAL_GetTick() - led_timer_start > led_on_duration)) {
+      //// Cuando se acaba el tiempo de éxito, apagar ambos LEDs
         led_off(&led1);
+        led_off(&led_ext);
         led_timer_start = 0;
     }
 }
@@ -191,11 +201,12 @@ int main(void)
   /* USER CODE BEGIN 2 */
   // Inicialización de los drivers personalizados
   led_init(&led1);
+  led_init(&led_ext);
   ring_buffer_init(&keypad_rb, keypad_buffer, KEYPAD_BUFFER_LEN);
   keypad_init(&keypad); // Asegura que las filas del keypad estén en BAJO
 
   printf("Sistema de Control de Acceso Iniciado.\r\n");
-  printf("Ingrese la contraseña de 4 digitos...\r\n");
+  printf("Ingrese la contraseña de 4 digitos.\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -203,7 +214,14 @@ int main(void)
   while (1)
   {
     uint8_t key_from_buffer;
-    
+  /**
+    1. Leer teclas del buffer circular.
+    2. Procesar la tecla si ha pasado el tiempo de anti-rebote.
+    3. Gestionar el temporizador del LED en cada iteración del bucle.
+       Esto permite que el LED se apague solo sin detener el programa.
+  */
+
+    // 1. Leer teclas del buffer circular
   // Leer teclas del buffer circular
     if (ring_buffer_read(&keypad_rb, &key_from_buffer)) {
         uint32_t now = HAL_GetTick();
@@ -217,9 +235,21 @@ int main(void)
     // 3. Gestionar el temporizador del LED en cada iteración del bucle.
     //    Esto permite que el LED se apague solo sin detener el programa.
     // Manejo del temporizador del LED (no bloqueante)
-   manage_led_timer();
-    
+    /**
+     * @brief Gestiona el apagado automático de los LEDs sin bloquear el programa.
+      * @note  Esta función debe ser llamada repetidamente en el bucle principal.
+      */
+    manage_led_timer();
+
     /* USER CODE END WHILE */
+// --- Parpadeo rápido del LED externo durante el tiempo de éxito ---
+  if (led_timer_start != 0) {
+      static uint32_t last_blink = 0;
+      if (HAL_GetTick() - last_blink >= 150) { // ← cambia 150 ms para ajustar la velocidad
+          led_toggle(&led_ext);
+          last_blink = HAL_GetTick();
+     }
+    }
 
     /* USER CODE BEGIN 3 */
   }
@@ -230,6 +260,8 @@ int main(void)
 /**
   * @brief System Clock Configuration
   * @retval None
+  * @note  Esta función configura el reloj del sistema.
+  * @note  Generada por CubeMX.
   */
 void SystemClock_Config(void)
 {
@@ -331,7 +363,12 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LD2_Pin|KEYPAD_R1_Pin, GPIO_PIN_RESET);
+  /**
+  * @brief Configura el nivel de salida de los pines GPIO antes de la inicialización.
+  */
+
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|KEYPAD_R1_Pin|GPIO_PIN_7, GPIO_PIN_RESET);
+
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, KEYPAD_R2_Pin|KEYPAD_R4_Pin|KEYPAD_R3_Pin, GPIO_PIN_RESET);
@@ -343,7 +380,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD2_Pin KEYPAD_R1_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin|KEYPAD_R1_Pin;
+  GPIO_InitStruct.Pin = LD2_Pin|KEYPAD_R1_Pin|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -392,6 +429,13 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 // Sobrescribir la función _write para redirigir printf a la UART
+/**
+*@brief Redirige la salida de printf a través de UART.
+ @param file Descriptor de archivo (no usado).
+ @param ptr Puntero a los datos a enviar.
+ @param len Longitud de los datos.
+ @return Número de bytes enviados.
+ */
 int _write(int file, char *ptr, int len)
 {
     HAL_UART_Transmit(&huart2, (uint8_t*)ptr, len, HAL_MAX_DELAY);

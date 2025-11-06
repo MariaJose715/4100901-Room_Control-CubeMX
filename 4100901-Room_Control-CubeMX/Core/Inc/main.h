@@ -50,6 +50,9 @@ extern "C" {
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
+/**
+  * @brief This function handles EXTI line[9:5] interrupts.
+  */
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
