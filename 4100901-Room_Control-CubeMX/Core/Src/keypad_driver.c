@@ -24,11 +24,17 @@ void keypad_init(keypad_handle_t* keypad) {
 
 /**
  * @brief Escanea qué tecla fue presionada en función de la columna activada.
+ * @param keypad Puntero a la estructura del keypad.
+ * @param col_pin Pin de la columna que generó la interrupción.
+ * @note Esta función implementa un escaneo por filas para identificar la tecla presionada.
  */
 char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
     HAL_Delay(5); // Pequeño delay de antirrebote
 
     // Determinar qué columna generó la interrupción
+    /**
+    *@note Esta función implementa un escaneo por filas para identificar la tecla presionada.
+        */
     int col_index = -1;
     for (int i = 0; i < KEYPAD_COLS; i++) {
         if (keypad->col_pins[i] == col_pin) {
@@ -41,6 +47,9 @@ char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
     char key_pressed = '\0';
 
     // Poner todas las filas en ALTO antes de escanear
+    /**
+     * @brief Pone todas las filas en nivel alto antes de escanear.
+     */
     for (int i = 0; i < KEYPAD_ROWS; i++) {
         HAL_GPIO_WritePin(keypad->row_ports[i], keypad->row_pins[i], GPIO_PIN_SET);
     }

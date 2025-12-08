@@ -26,6 +26,8 @@
 #include "keypad_driver.h"
 #include <stdio.h>
 #include <string.h>
+#include "ssd1306.h"
+#include "ssd1306_fonts.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,7 +42,7 @@
 #define PASSWORD_LEN 4
 #define DEBOUNCE_TIME_MS 200      // Tiempo de anti-rebote para las teclas 
 #define FEEDBACK_LED_TIME_MS 100  // Tiempo que el LED se enciende al oprimir cualquier tecla
-#define SUCCESS_LED_TIME_MS 4000  // Tiempo que el LED se enciende cuando se ingresa la contraseña correcta
+#define SUCCESS_LED_TIME_MS 5000  // Tiempo que el LED se enciende cuando se ingresa la contraseña correcta
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,6 +51,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
@@ -58,9 +62,14 @@ UART_HandleTypeDef huart2;
  * @note  Esta estructura se utiliza para controlar el LED integrado en la placa.
  * @param led1 Estructura que define el puerto y pin del LED.
  */
+
 led_handle_t led1 = { .port = GPIOA, .pin = GPIO_PIN_5 }; // LD2
 led_handle_t led_ext = { .port = GPIOA, .pin = GPIO_PIN_7 }; // LED externo en PA7
 
+/**
+ * @brief Keypad handle ---
+ * @note  Esta estructura define los puertos y pines utilizados para el teclado matricial.
+*/ 
 keypad_handle_t keypad = {
     .row_ports = {KEYPAD_R1_GPIO_Port, KEYPAD_R2_GPIO_Port, KEYPAD_R3_GPIO_Port, KEYPAD_R4_GPIO_Port},
     .row_pins  = {KEYPAD_R1_Pin, KEYPAD_R2_Pin, KEYPAD_R3_Pin, KEYPAD_R4_Pin},
@@ -68,15 +77,27 @@ keypad_handle_t keypad = {
     .col_pins  = {KEYPAD_C1_Pin, KEYPAD_C2_Pin, KEYPAD_C3_Pin, KEYPAD_C4_Pin}
 };
 // --- Buffer circular para teclas ---
+/**
+* @brief Buffer circular para almacenar las teclas presionadas ---
+ * @note  Este buffer almacena las teclas leídas del teclado para su procesamiento posterior.
+ */
 #define KEYPAD_BUFFER_LEN 16
 uint8_t keypad_buffer[KEYPAD_BUFFER_LEN];
 ring_buffer_t keypad_rb;
 
 // --- VARIABLES DE CONTROL DE ACCESO ---
+/**
+*@brief Variables para manejar la contraseña ingresada ---
+ * @note  Estas variables almacenan la contraseña ingresada por el usuario y su índice actual.
+ */
 char entered_password[PASSWORD_LEN + 1] = {0};
 uint8_t password_index = 0;
 
 // --- VARIABLES DE ESTADO PARA LOGICA NO BLOQUEANTE ---
+/**
+*@brief Variables para manejar tiempos y estados ---
+ * @note  Estas variables ayudan a gestionar el tiempo de anti-rebote y el temporizador del LED sin bloquear el programa.
+ */
 uint32_t last_key_press_time = 0;
 uint32_t led_timer_start = 0;
 uint32_t led_on_duration = 0;
@@ -86,7 +107,12 @@ uint32_t led_on_duration = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
+/**
+*@brief Prototipos de funciones privadas ---
+  @note  Declaraciones de funciones utilizadas en este archivo.
+  */
 void manage_led_timer(void);
 void process_key(uint8_t key);
 /* USER CODE END PFP */
@@ -175,6 +201,7 @@ void manage_led_timer(void)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -198,17 +225,31 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   // Inicialización de los drivers personalizados
+  /**
+  * @brief Inicializa los drivers personalizados para LEDs y keypad.
+  */
   led_init(&led1);
   led_init(&led_ext);
+  /**
+  * @brief Inicializa el buffer circular para el keypad.
+  */
   ring_buffer_init(&keypad_rb, keypad_buffer, KEYPAD_BUFFER_LEN);
-  keypad_init(&keypad); // Asegura que las filas del keypad estén en BAJO
+  /**
+  * @brief Inicializa el keypad.
+  */
+  keypad_init(&keypad); //inicializa las filas en bajo
 
   printf("Sistema de Control de Acceso Iniciado.\r\n");
   printf("Ingrese la contraseña de 4 digitos.\r\n");
   /* USER CODE END 2 */
-
+    ssd1306_Init();
+    ssd1306_Fill(Black);
+    ssd1306_SetCursor(0, 0);
+    ssd1306_WriteString("Hello Majo!", Font_11x18, White);
+    ssd1306_UpdateScreen();
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -242,26 +283,15 @@ int main(void)
     manage_led_timer();
 
     /* USER CODE END WHILE */
-// --- Parpadeo rápido del LED externo durante el tiempo de éxito ---
-  if (led_timer_start != 0) {
-      static uint32_t last_blink = 0;
-      if (HAL_GetTick() - last_blink >= 150) { // ← cambia 150 ms para ajustar la velocidad
-          led_toggle(&led_ext);
-          last_blink = HAL_GetTick();
-     }
-    }
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
-/* ---------------------- FUNCIONES DE HARDWARE ---------------------- */
 
 /**
   * @brief System Clock Configuration
   * @retval None
-  * @note  Esta función configura el reloj del sistema.
-  * @note  Generada por CubeMX.
   */
 void SystemClock_Config(void)
 {
@@ -309,6 +339,54 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x10D19CE4;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -353,8 +431,8 @@ static void MX_USART2_UART_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -363,12 +441,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  /**
-  * @brief Configura el nivel de salida de los pines GPIO antes de la inicialización.
-  */
-
-  HAL_GPIO_WritePin(GPIOA, LD2_Pin|KEYPAD_R1_Pin|GPIO_PIN_7, GPIO_PIN_RESET);
-
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|LED_EXT_Pin|KEYPAD_R1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, KEYPAD_R2_Pin|KEYPAD_R4_Pin|KEYPAD_R3_Pin, GPIO_PIN_RESET);
@@ -379,8 +452,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD2_Pin KEYPAD_R1_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin|KEYPAD_R1_Pin|GPIO_PIN_7;
+  /*Configure GPIO pins : LD2_Pin LED_EXT_Pin KEYPAD_R1_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin|LED_EXT_Pin|KEYPAD_R1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -388,19 +461,19 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : KEYPAD_C1_Pin */
   GPIO_InitStruct.Pin = KEYPAD_C1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(KEYPAD_C1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : KEYPAD_C4_Pin */
   GPIO_InitStruct.Pin = KEYPAD_C4_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(KEYPAD_C4_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : KEYPAD_C2_Pin KEYPAD_C3_Pin */
   GPIO_InitStruct.Pin = KEYPAD_C2_Pin|KEYPAD_C3_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -412,19 +485,14 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  /* MODIFICADO: Se cambia la prioridad de 0 (máxima) a 5 (media-baja).
-   * Un valor numérico más bajo significa una prioridad más alta en ARM Cortex-M.
-   * Usar prioridad 0 es arriesgado, ya que puede bloquear interrupciones del sistema.
-   * Una prioridad de 5 es segura para periféricos de usuario como un teclado.
-  */
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -435,6 +503,7 @@ static void MX_GPIO_Init(void)
  @param ptr Puntero a los datos a enviar.
  @param len Longitud de los datos.
  @return Número de bytes enviados.
+ @note Esto permite usar printf para depuración vía UART.
  */
 int _write(int file, char *ptr, int len)
 {
@@ -457,8 +526,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

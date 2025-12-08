@@ -49,6 +49,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/ring_buffer.c
     Core/Src/keypad_driver.c
     Core/Src/main.c
+    Drivers/ssd1306/ssd1306.c
+    Drivers/ssd1306/ssd1306_fonts.c
 
 )
 
@@ -56,6 +58,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+    Drivers/ssd1306
 )
 
 # Add project symbols (macros)
