@@ -30,21 +30,23 @@ Este diseño reemplaza la función de climatización del proyecto original y la 
 
 ## 3. Arquitectura del Sistema
 ### 3.1 Arquitectura de Hardware
-+---------------------------------------------------+
-|                 STM32 NUCLEO-L476RG               |
-|                                                   |
-|  SPI2  <------>  RC522 (RFID)                     |
-|                                                   |
-|  GPIO (EXTI columnas + filas) <--> Teclado 4x4    |
-|                                                   |
-|  I2C1 <------> Pantalla OLED SSD1306              |
-|                                                   |
-|  TIM3 CH1 PWM ----> Servo SG90 (Cerradura)        |
-|                                                   |
-|  USART2 <------> ESP-01 (Eventos/Logs)            |
-|                                                   |
-|  GPIO OUT ------------> LED RGB                   |
-+---------------------------------------------------+
+graph TD
+    subgraph MCU[STM32 NUCLEO-L476RG]
+        SPI2((SPI2))
+        I2C1((I2C1))
+        GPIOK[GPIO<br/>Filas/Columnas]
+        TIM3((TIM3 CH1 PWM))
+        USART2((USART2))
+        GPIORGB[GPIO<br/>LED RGB]
+    end
+
+    SPI2 --> RC522[RC522<br/>Lector RFID]
+    GPIOK --> KEYPAD[Teclado 4x4]
+    I2C1 --> OLED[Pantalla OLED<br/>SSD1306]
+    TIM3 --> SERVO[Servo SG90<br/>Cerradura]
+    USART2 --> ESP01[ESP-01<br/>WiFi / Logs]
+    GPIORGB --> LEDRGB[LED RGB<br/>Estado]
+
 
 3.1.1 Descripción de Componentes
 Componente	Función	Interfaz
@@ -56,56 +58,17 @@ ESP-01	transmisión de eventos	UART2
 LED RGB	indicador del estado	GPIO
 ### 3.2 Arquitectura de Firmware
 3.2.1 Diagrama de Bloques del Firmware
-+---------------------------------------------------------------+
-|                       room_control.c                          |
-|---------------------------------------------------------------|
-| - Máquina de estados                                           |
-| - Validación RFID + PIN                                        |
-| - Control del servo                                             |
-| - Actualización OLED                                            |
-| - Envío de eventos al ESP-01                                   |
-+---------------------------------------------------------------+
+graph TD
+    MAIN[main.c<br/>Super Loop] --> ROOM[room_control.c<br/>Lógica de acceso<br/>Máquina de estados]
 
-                |                 |                |
-                v                 v                v
+    ROOM --> MOD_KEYPAD[keypad.c<br/>Lectura teclado<br/>por interrupciones]
+    ROOM --> MOD_RFID[rc522.c<br/>Lector RFID]
+    ROOM --> MOD_SERVO[servo_control.c<br/>Control servo]
+    ROOM --> MOD_OLED[ssd1306.c<br/>Display OLED]
+    ROOM --> MOD_UART[ESP / UART<br/>Logs y eventos]
 
-+------------------------+   +------------------------+   +------------------------+
-|      keypad.c          |   |      rc522.c           |   |  servo_control.c       |
-|------------------------|   |------------------------|   |------------------------|
-| - Lectura por EXTI     |   | - Lectura UID RFID     |   | - PWM para servo       |
-| - Scan filas/columnas  |   | - Anticolisión         |   | - Movimiento suave     |
-| - Envío a ring buffer  |   | - SPI2                 |   | - Ángulos              |
-+------------------------+   +------------------------+   +------------------------+
+    MOD_KEYPAD --> RING[ring_buffer.c<br/>Buffer circular teclas]
 
-                |
-                v
-
-+------------------------+
-|     ring_buffer.c      |
-|------------------------|
-| - FIFO no bloqueante   |
-| - Almacena teclas      |
-+------------------------+
-
-                |
-                v
-
-+------------------------+
-|      ssd1306.c         |
-|------------------------|
-| - Mensajes por estado  |
-| - Textos y gráficos    |
-+------------------------+
-
-                |
-                v
-
-+------------------------+
-|  Comunicación UART     |
-|------------------------|
-| - Logs a ESP-01        |
-| - Reporte de eventos   |
-+------------------------+
 
 3.2.2 Patrón de Diseño: Super Loop No Bloqueante
 
@@ -126,15 +89,29 @@ while (1) {
 ✔ Es ideal para sistemas embebidos reactivos
 
 3.2.3 Máquina de Estados (Definida en room_control.c)
-[WAITING_RFID] ---> [INPUT_PIN] ---> [CHECK_PIN] ---> [UNLOCKED]
-      ^                   |                  |                 |
-      |                   | PIN parcial       | PIN incorrecto |
-      |                   v                  v                 |
-      |              [INPUT_PIN]      [ACCESS_DENIED]          |
-      |                                   |                    |
-      |                         intentos >= 3                  |
-      |                                   v                    |
-      +--------------------------- [SYSTEM_LOCKOUT] <-----------+
+stateDiagram-v2
+    [*] --> WAITING_RFID
+
+    WAITING_RFID : Esperando tarjeta RFID
+    INPUT_PIN    : Ingreso de PIN
+    CHECK_PIN    : Validación de PIN
+    UNLOCKED     : Puerta abierta
+    ACCESS_DENIED: Acceso denegado
+    SYSTEM_LOCKOUT: Sistema bloqueado
+
+    WAITING_RFID --> INPUT_PIN : Tarjeta válida
+    WAITING_RFID --> ACCESS_DENIED : Tarjeta inválida
+
+    INPUT_PIN --> CHECK_PIN : PIN completo
+    CHECK_PIN --> UNLOCKED : PIN correcto
+    CHECK_PIN --> ACCESS_DENIED : PIN incorrecto
+
+    ACCESS_DENIED --> WAITING_RFID : Timeout / volver a intentar
+    ACCESS_DENIED --> SYSTEM_LOCKOUT : Intentos >= 3
+
+    UNLOCKED --> WAITING_RFID : Tiempo puerta abierta cumplido
+    SYSTEM_LOCKOUT --> WAITING_RFID : Fin del tiempo de bloqueo
+
 
 ## 4. Descripción Funcional del Sistema
 4.1 Control de Acceso RFID
@@ -242,6 +219,42 @@ Servo	Movimiento suave y controlado
 OLED	Mensajes claros por estado
 Lockout	Funciona según intentos
 Eventos UART	Reportes correctos
+
+flowchart TD
+    A[Inicio] --> B[Estado WAITING_RFID<br/>Esperar tarjeta]
+    B --> C{Tarjeta detectada?}
+    C -- No --> B
+
+    C -- Sí --> D{UID válido?}
+    D -- No --> E[ACCESS_DENIED<br/>Mostrar 'Denegado'<br/>LED rojo]
+    E --> B
+
+    D -- Sí --> F[INPUT_PIN<br/>Mostrar 'Ingrese PIN'<br/>LED amarillo]
+
+    F --> G{PIN completo?}
+    G -- No --> F
+
+    G -- Sí --> H[CHECK_PIN<br/>Comparar con contraseña]
+
+    H --> I{PIN correcto?}
+    I -- No --> J[ACCESS_DENIED<br/>Intentos++]
+    J --> K{Intentos >= 3?}
+    K -- Sí --> L[SYSTEM_LOCKOUT<br/>Bloqueo temporal<br/>LED magenta]
+    L --> B
+    K -- No --> B
+
+    I -- Sí --> M[UNLOCKED<br/>Acceso concedido<br/>LED verde<br/>Servo abre]
+    M --> N[Esperar tiempo puertas abierta]
+    N --> B
+
+5. Estados y colores del LED RGB
+flowchart LR
+    WAIT[WAITING_RFID] -->|Azul| RGB1[LED RGB]
+    PIN[INPUT_PIN] -->|Amarillo| RGB2[LED RGB]
+    OK[UNLOCKED] -->|Verde| RGB3[LED RGB]
+    DENY[ACCESS_DENIED] -->|Rojo| RGB4[LED RGB]
+    LOCK[SYSTEM_LOCKOUT] -->|Magenta| RGB5[LED RGB]
+
 ## 8. Conclusiones
 
 Se logró un sistema de doble seguridad funcional (RFID + PIN).
