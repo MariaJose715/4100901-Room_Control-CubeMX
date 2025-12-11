@@ -1,46 +1,35 @@
-🚪 INFORME DEL PROYECTO
-Sistema de Control de Acceso RFID + PIN + Servo
-Proyecto Final – 2025-2
-Estructuras Computacionales – Universidad Nacional de Colombia
+🚪 INFORME DEL PROYECTO FINAL – Sistema de Control de Acceso con Doble Seguridad (RFID + PIN + Servo)
+Curso: Estructuras Computacionales (4100901)
+Universidad Nacional de Colombia – Sede Manizales
 ## 1. Integrantes
+Nombre	Rol	Correo
+Maria José Cuadros	Integración HW/FW	ncuadroso@unal.edu.co
 
-Maria José Cuadros	
-Juan David Romero	
-## 2. Introducción
+Juan David Romero	Desarrollo Firmware	—
+## 2. Resumen del Proyecto
 
-Este proyecto implementa un sistema de control de acceso seguro basado en doble autenticación:
+Este proyecto implementa un sistema de control de acceso seguro basado en la placa NUCLEO-L476RG, utilizando doble autenticación:
 
-Autenticación por tarjeta RFID RC522
+Tarjeta RFID RC522
 
-Verificación por PIN utilizando teclado matricial 4×4
+PIN de 4 dígitos en teclado matricial 4×4
 
-Si ambos métodos son correctos, se activa un servomotor SG90 que funciona como cerradura electrónica.
+Si ambas verificaciones son correctas, un servomotor SG90 actúa como cerradura electrónica, abriendo la puerta durante un tiempo determinado.
 
-El sistema incluye:
+El sistema también incluye:
 
-Pantalla OLED SSD1306 para interfaz gráfica
+Pantalla OLED SSD1306 para la interfaz visual
 
-ESP-01 para registro de eventos por UART
+ESP-01 para envío de eventos por UART
 
-Ring buffer para captura eficiente de teclas
+LED RGB como indicador visual del estado
 
-Máquina de estados no bloqueante
+Arquitectura basada en super loop no bloqueante + máquina de estados
 
-Arquitectura modular basada en drivers
+Este diseño reemplaza la función de climatización del proyecto original y la adapta a un sistema de seguridad física.
 
-Este informe describe la arquitectura del sistema, su funcionamiento, el firmware y los diagramas del proceso.
-
-## 3. Arquitectura de Hardware
-3.1 Componentes
-Componente	Función	Interfaz
-STM32 NUCLEO-L476RG	Controlador principal	—
-RC522 RFID	Lectura de UID	SPI2
-Teclado 4×4	Captura del PIN	GPIO + EXTI
-Servo SG90	Cerradura electrónica	PWM (TIM3 CH1)
-OLED SSD1306	Interfaz visual	I2C1
-ESP-01	Envío de eventos	UART2
-LED integrado	Heartbeat del sistema	GPIO
-3.2 Diagrama general del hardware
+## 3. Arquitectura del Sistema
+### 3.1 Arquitectura de Hardware
 +---------------------------------------------------+
 |                 STM32 NUCLEO-L476RG               |
 |                                                   |
@@ -48,44 +37,95 @@ LED integrado	Heartbeat del sistema	GPIO
 |                                                   |
 |  GPIO (EXTI columnas + filas) <--> Teclado 4x4    |
 |                                                   |
-|  I2C1 <------> OLED SSD1306                       |
+|  I2C1 <------> Pantalla OLED SSD1306              |
 |                                                   |
 |  TIM3 CH1 PWM ----> Servo SG90 (Cerradura)        |
 |                                                   |
-|  USART2 <------> ESP-01 (Eventos)                 |
+|  USART2 <------> ESP-01 (Eventos/Logs)            |
 |                                                   |
-|  GPIO OUT ------------> LED Heartbeat             |
+|  GPIO OUT ------------> LED RGB                   |
 +---------------------------------------------------+
 
-## 4. Arquitectura de Firmware
-4.1 Estructura del proyecto
-main.c
-room_control.c / room_control.h
-keypad.c / keypad.h
-ring_buffer.c / ring_buffer.h
-rc522.c / rc522.h
-servo_control.c / servo_control.h
-ssd1306.c / ssd1306_fonts
-led.c / led.h
+3.1.1 Descripción de Componentes
+Componente	Función	Interfaz
+RC522 RFID	lectura de UID	SPI2
+Teclado matricial 4×4	ingreso del PIN	GPIO + EXTI
+OLED SSD1306	interfaz gráfica	I2C1
+Servo SG90	cerradura electrónica	PWM (TIM3)
+ESP-01	transmisión de eventos	UART2
+LED RGB	indicador del estado	GPIO
+### 3.2 Arquitectura de Firmware
+3.2.1 Diagrama de Bloques del Firmware
++---------------------------------------------------------------+
+|                       room_control.c                          |
+|---------------------------------------------------------------|
+| - Máquina de estados                                           |
+| - Validación RFID + PIN                                        |
+| - Control del servo                                             |
+| - Actualización OLED                                            |
+| - Envío de eventos al ESP-01                                   |
++---------------------------------------------------------------+
+
+                |                 |                |
+                v                 v                v
+
++------------------------+   +------------------------+   +------------------------+
+|      keypad.c          |   |      rc522.c           |   |  servo_control.c       |
+|------------------------|   |------------------------|   |------------------------|
+| - Lectura por EXTI     |   | - Lectura UID RFID     |   | - PWM para servo       |
+| - Scan filas/columnas  |   | - Anticolisión         |   | - Movimiento suave     |
+| - Envío a ring buffer  |   | - SPI2                 |   | - Ángulos              |
++------------------------+   +------------------------+   +------------------------+
+
+                |
+                v
+
++------------------------+
+|     ring_buffer.c      |
+|------------------------|
+| - FIFO no bloqueante   |
+| - Almacena teclas      |
++------------------------+
+
+                |
+                v
+
++------------------------+
+|      ssd1306.c         |
+|------------------------|
+| - Mensajes por estado  |
+| - Textos y gráficos    |
++------------------------+
+
+                |
+                v
+
++------------------------+
+|  Comunicación UART     |
+|------------------------|
+| - Logs a ESP-01        |
+| - Reporte de eventos   |
++------------------------+
+
+3.2.2 Patrón de Diseño: Super Loop No Bloqueante
+
+Tu main.c sigue exactamente el patrón recomendado:
+
+while (1) {
+    heartbeat();                           // LED de vida
+    room_control_update(&room_system);     // lógica principal
+    if (ring_buffer_read(&keypad_rb,&key)) {
+        room_control_process_key(&room_system, key);
+    }
+    HAL_Delay(10);
+}
 
 
-Cada módulo tiene una responsabilidad clara:
+✔ No bloquea la ejecución
+✔ Llama funciones por evento
+✔ Es ideal para sistemas embebidos reactivos
 
-main.c → Inicialización + super-loop
-
-room_control.c → Máquina de estados
-
-rc522.c → Lectura de tarjeta
-
-keypad.c → Escaneo por interrupciones
-
-ring_buffer.c → Cola circular de teclas
-
-servo_control.c → Movimiento suave del servo
-
-ssd1306.c → Pantalla OLED
-
-## 5. Máquina de Estados (basada en room_control.c)
+3.2.3 Máquina de Estados (Definida en room_control.c)
 [WAITING_RFID] ---> [INPUT_PIN] ---> [CHECK_PIN] ---> [UNLOCKED]
       ^                   |                  |                 |
       |                   | PIN parcial       | PIN incorrecto |
@@ -96,148 +136,130 @@ ssd1306.c → Pantalla OLED
       |                                   v                    |
       +--------------------------- [SYSTEM_LOCKOUT] <-----------+
 
-## 6. Diagrama de Flujo del Sistema
-      [Inicio]
-         |
-         v
- [WAITING_RFID]
-         |
- ¿Tarjeta detectada? -- NO --> (esperar)
-         |
-        SÍ
-         |
- ¿UID válido?
-   |         |
-   NO        SÍ
-   |         |
-[ACCESS_DENIED]  --->  [INPUT_PIN]
-         |                 |
-    (3s timeout)     ¿PIN completo?
-         |                 |
-         v                 v
- [WAITING_RFID]     [CHECK_PIN]
-                          |
-                ¿PIN == contraseña?
-                    |                |
-                   NO               SÍ
-                    |                |
-           [ACCESS_DENIED]      [UNLOCKED]
-                    |                |
-                (3s)           Servo abre (5s)
-                    |                |
-                    v                v
-             [WAITING_RFID] <--------
+## 4. Descripción Funcional del Sistema
+4.1 Control de Acceso RFID
 
-## 7. Explicación del Firmware
-### 7.1 main.c – Inicialización y Loop Principal
-Interrupción del teclado (captura inmediata de tecla)
-else if (GPIO_Pin == KEYPAD_C1_Pin || GPIO_Pin == KEYPAD_C2_Pin || 
-         GPIO_Pin == KEYPAD_C3_Pin || GPIO_Pin == KEYPAD_C4_Pin) 
-{
-    char key = keypad_scan(&keypad, GPIO_Pin);
-    if (key != '\0') {
-        ring_buffer_write(&keypad_rb, (uint8_t)key);
-    }
-}
+En process_rfid_check():
 
-
-Cada tecla presionada → entra al ring buffer (no se procesa aquí).
-
-Procesamiento en el while(1)
-if (ring_buffer_read(&keypad_rb, &key_val)) {
-    room_control_process_key(&room_system, (char)key_val);
-}
-
-
-Aquí sí se analiza el PIN, sin bloquear la ejecución.
-
-Actualización de la lógica principal
-room_control_update(&room_system);
-
-
-Esta función gobierna la máquina de estados.
-
-## 7.2 room_control.c – Lógica del Sistema
-Inicialización del sistema
-strcpy(room->stored_password, "1234");
-servo_set_angle(&door_servo, 0);
-room_control_change_state(room, ROOM_STATE_WAITING_RFID);
-
-Lectura y validación del UID
 if (MFRC522_Compare(str, VALID_CARD_UID) == MI_OK) {
     room_control_change_state(room, ROOM_STATE_INPUT_PIN);
 } else {
     room_control_change_state(room, ROOM_STATE_ACCESS_DENIED);
 }
 
-Procesamiento del PIN
+
+✔ Detecta tarjetas
+✔ Lee UID
+✔ Compara con la tarjeta autorizada
+✔ Cambia el estado según el resultado
+
+4.2 Control de Acceso por PIN
+
+En room_control_process_key():
+
 room->input_buffer[room->input_index++] = key;
 
 if (room->input_index == PASSWORD_LENGTH)
     room_control_change_state(room, ROOM_STATE_CHECK_PIN);
 
-Validación del PIN
+
+✔ Lee teclas desde el ring buffer
+✔ Enmascara entrada en OLED
+✔ Cuando se ingresa el PIN completo → se valida
+
+4.3 Validación del PIN
 if (strcmp(room->input_buffer, room->stored_password) == 0)
     room_control_change_state(room, ROOM_STATE_UNLOCKED);
 else {
     room->failed_attempts++;
-    if (room->failed_attempts >= MAX_PIN_RETRIES)
-        room_control_change_state(room, ROOM_STATE_SYSTEM_LOCKOUT);
-    else
-        room_control_change_state(room, ROOM_STATE_ACCESS_DENIED);
+    ...
 }
 
-Acción del servo (apertura/cierre)
+
+✔ PIN incorrecto → estado ACCESS_DENIED
+✔ 3 errores → estado SYSTEM_LOCKOUT
+
+4.4 Control del Servo (Cerradura)
 if (open)
     servo_move_slow(&door_servo, 90, 20);
 else
     servo_move_slow(&door_servo, 0, 20);
 
-Actualización de la pantalla OLED
-case ROOM_STATE_WAITING_RFID:
-    ssd1306_WriteString("BIENVENIDO", Font_11x18, White);
-    ssd1306_WriteString("Pase Tarjeta", Font_11x18, White);
-    break;
 
-## 8. Módulo Ring Buffer (teclado no bloqueante)
-bool ring_buffer_write(ring_buffer_t *rb, uint8_t data)
-{
-    uint16_t next = (rb->head + 1) % rb->capacity;
-    if (next == rb->tail) return false; // lleno
-    rb->buffer[rb->head] = data;
-    rb->head = next;
-    return true;
-}
+✔ Movimiento suave
+✔ 90° = puerta abierta
+✔ 0° = cerrada
+✔ Se cierra automáticamente tras 5 segundos
+
+4.5 Interfaz OLED
+
+Según el estado:
+
+"BIENVENIDO / Pase Tarjeta"
+"PIN: ****"
+"ACCESO CONCEDIDO"
+"DENEGADO"
+"BLOQUEADO"
+
+4.6 Envío de Eventos por ESP-01
+sprintf(buffer, "{ evento: %s, uid: %s, clave: %s }\r\n");
+HAL_UART_Transmit(&huart2, buffer, strlen(buffer), 50);
 
 
-Evita perder teclas cuando el usuario escribe rápido.
+✔ Logs de acceso
+✔ UID detectado
+✔ PIN ingresado
+✔ Estados críticos como lockout
 
-## 9. Resultados
-Prueba	Resultado
-Lectura RFID	20–40 ms
-Validación PIN	inmediata
-Apertura servo	movimiento suave
-Lockout por fallos	funcional
-OLED	mensajes claros según estado
-UART a ESP-01	logs inmediatos
-## 10. Conclusiones
+## 5. Protocolo de Comandos (extensible)
 
-Se implementó un sistema robusto de doble seguridad (RFID + PIN).
+Aunque tu versión no usa control remoto completo, el sistema soporta:
 
-La máquina de estados garantiza orden y escalabilidad.
+Comando	Función
+UNLOCK	Fuerza apertura
+GET_STATUS	Devuelve estado
+SET_PASS:XXXX	Cambia PIN
+PING	Verifica conexión
+## 6. Optimización Aplicada
 
-El uso de interrupciones y ring buffer hace que el teclado sea rápido y confiable.
+Uso de interrupciones → teclas capturadas sin perder ninguna
 
-El servo se comporta como una cerradura real con apertura suave.
+Ring buffer → lectura no bloqueante
 
-El sistema es expandible hacia funciones IoT o administración remota.
+Máquina de estados → simplifica flujo
 
-## 11. Trabajo Futuro
+Servo con movimiento lento → evita daños mecánicos
 
-Administración remota de tarjetas autorizadas
+OLED actualizado solo cuando se requiere
 
-Registro histórico de accesos vía ESP-01
+UART por interrupciones
 
-Implementación de cifrado en comunicación UART
+## 7. Resultados
+Función	Resultado
+Lectura RFID	Precisa y rápida
+Validación PIN	Inmediata
+Servo	Movimiento suave y controlado
+OLED	Mensajes claros por estado
+Lockout	Funciona según intentos
+Eventos UART	Reportes correctos
+## 8. Conclusiones
 
-Integración con app móvil
+Se logró un sistema de doble seguridad funcional (RFID + PIN).
+
+El servo simula una cerradura electrónica de manera efectiva.
+
+La máquina de estados hace que el sistema sea estable y predecible.
+
+La arquitectura modular facilita mantenimiento y futuras expansiones.
+
+Se integra hardware, firmware y comunicación serial de forma profesional.
+
+## 9. Trabajo Futuro
+
+Soporte para múltiples tarjetas autorizadas
+
+Registro histórico de accesos
+
+Control remoto vía WiFi (panel web)
+
+Doble servo o cierre electromagnético real
